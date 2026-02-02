@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SQLite DB Viewer</title>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #020617;
+      --border: #334155;
+      --border-strong: #475569;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+
+      /* table colors */
+      --table-header: #020617;
+      --table-header-border: #475569;
+      --table-body: #020617;
+      --row-alt: #020617;
+      --hover: #1e293b;
+    }
+
+    body.light {
+      --bg: #f4f6f9;
+      --panel: #ffffff;
+      --border: #cbd5e1;
+      --border-strong: #94a3b8;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --accent: #2563eb;
+
+      /* table colors */
+      --table-header: #e5e7eb;
+      --table-header-border: #94a3b8;
+      --table-body: #ffffff;
+      --row-alt: #f8fafc;
+      --hover: #eef2ff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 32px;
+      font-family: "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .container {
+      max-width: 1300px;
+      margin: auto;
+      background: var(--panel);
+      padding: 28px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      box-shadow: 0 15px 40px rgba(0, 0, 0, 0.35);
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 26px;
+      font-weight: 600;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    input[type="file"] {
+      padding: 6px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+    }
+
+    input[type="file"]::file-selector-button {
+      margin-right: 10px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: none;
+      background: var(--accent);
+      color: white;
+    }
+
+    #output {
+      margin-top: 24px;
+    }
+
+    h3 {
+      margin-top: 28px;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    /* === TABLE WRAPPER === */
+    .table-wrapper {
+      margin-top: 10px;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid var(--border-strong);
+      background: var(--table-body);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+    }
+
+    /* === TABLE HEADER / TITLE BAR === */
+    thead th {
+      background: var(--table-header);
+      padding: 12px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      border-right: 1px solid var(--table-header-border);
+      border-bottom: 2px solid var(--table-header-border);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    thead th:last-child {
+      border-right: none;
+    }
+
+    /* === TABLE BODY === */
+    tbody td {
+      padding: 10px 12px;
+      font-size: 13px;
+      border-right: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      background: var(--table-body);
+    }
+
+    tbody td:last-child {
+      border-right: none;
+    }
+
+    tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    tbody tr:nth-child(even) td {
+      background: var(--row-alt);
+    }
+
+    tbody tr:hover td {
+      background: var(--hover);
+    }
+
+    @media (max-width: 768px) {
+      body {
+        padding: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <h2>SQLite Database Viewer</h2>
+
+      <div class="controls">
+        <input type="file" id="dbFile" />
+        <button id="refreshBtn">Refresh</button>
+        <button id="themeBtn">Toggle Theme</button>
+      </div>
+    </header>
+
+    <div id="output"></div>
+  </div>
+
+  <script>
+    let currentFile = null;
+    let SQL = null;
+
+    const output = document.getElementById("output");
+    const fileInput = document.getElementById("dbFile");
+
+    async function loadDatabase(file) {
+      if (!file) return;
+
+      currentFile = file;
+      output.innerHTML = "Loading database...";
+
+      if (!SQL) {
+        SQL = await initSqlJs({
+          locateFile: f =>
+            `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${f}`
+        });
+      }
+
+      const buffer = await file.arrayBuffer();
+      const db = new SQL.Database(new Uint8Array(buffer));
+
+      const tablesResult = db.exec(
+        "SELECT name FROM sqlite_master WHERE type='table';"
+      );
+
+      output.innerHTML = "";
+
+      if (!tablesResult.length) {
+        output.innerHTML = "<p>No tables found.</p>";
+        return;
+      }
+
+      const tables = tablesResult[0].values;
+
+      tables.forEach(([table]) => {
+        output.innerHTML += `<h3>${table}</h3>`;
+
+        const result = db.exec(`SELECT * FROM "${table}" LIMIT 50;`);
+        if (!result.length) return;
+
+        const { columns, values } = result[0];
+
+        let html = `<div class="table-wrapper"><table><thead><tr>`;
+        columns.forEach(c => html += `<th>${c}</th>`);
+        html += "</tr></thead><tbody>";
+
+        values.forEach(row => {
+          html += "<tr>";
+          row.forEach(cell => {
+            html += `<td>${cell ?? ""}</td>`;
+          });
+          html += "</tr>";
+        });
+
+        html += "</tbody></table></div>";
+        output.innerHTML += html;
+      });
+    }
+
+    fileInput.addEventListener("change", e => {
+      const file = e.target.files[0];
+      if (file) loadDatabase(file);
+    });
+
+    document.getElementById("refreshBtn").addEventListener("click", () => {
+      if (currentFile) loadDatabase(currentFile);
+    });
+
+    document.getElementById("themeBtn").addEventListener("click", () => {
+      document.body.classList.toggle("light");
+    });
+  </script>
+
+</body>
+</html>
